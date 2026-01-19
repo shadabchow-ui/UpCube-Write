@@ -3,7 +3,8 @@ FROM maven:3.9.6-eclipse-temurin-17 AS build
 
 WORKDIR /build
 COPY . .
-RUN mvn -q -DskipTests package
+
+RUN mvn -q -DskipTests -Dgit.commit.id.skip=true package
 
 # ---- Runtime stage ----
 FROM eclipse-temurin:17-jre
@@ -14,4 +15,3 @@ COPY --from=build /build/languagetool-server/target/languagetool-server.jar /app
 EXPOSE 8010
 
 CMD ["java", "-jar", "/app/languagetool-server.jar"]
-

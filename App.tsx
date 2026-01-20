@@ -1,165 +1,501 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import Editor from './Editor'
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-const API_BASE = import.meta.env.VITE_LT_API || '/check'
+type Status = 'online' | 'offline';
 
-type ApiStatus = 'checking' | 'ok' | 'down'
+type SuggestionSeverity = 'critical' | 'warning' | 'info';
+
+type Suggestion = {
+  id: string;
+  severity: SuggestionSeverity;
+  title: string;
+  detail: string;
+  before?: string;
+  after?: string;
+  apply?: (text: string) => string;
+};
+
+const SIDEBAR_ITEMS = [
+  { key: 'docs', label: 'Docs' },
+  { key: 'templates', label: 'Templates' },
+  { key: 'tone', label: 'Tone & style' },
+  { key: 'settings', label: 'Settings' },
+] as const;
 
 export default function App() {
-  const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
-  const [apiMessage, setApiMessage] = useState<string>('Checking language engine…')
+  // Fake engine status (replace with your real backend healthcheck later)
+  const [status, setStatus] = useState<Status>('offline');
+
+  const [activeNav, setActiveNav] = useState<(typeof SIDEBAR_ITEMS)[number]['key']>('docs');
+  const [docTitle, setDocTitle] = useState('Untitled doc');
+  const [text, setText] = useState('');
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    let cancelled = false
+    // Example: pretend we “ping” and stay offline for now.
+    // Replace with your real /health endpoint check.
+    setStatus('offline');
+  }, []);
 
-    async function ping() {
-      try {
-        // If your backend exposes a /health endpoint, use it.
-        // Otherwise we do a lightweight POST to /check with tiny text.
-        const res = await fetch(API_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            language: 'en-US',
-            text: 'hello',
-          }).toString(),
-        })
+  const suggestions = useMemo(() => buildSuggestions(text), [text]);
 
-        if (!cancelled) {
-          if (res.ok) {
-            setApiStatus('ok')
-            setApiMessage('Language engine online')
-          } else {
-            setApiStatus('down')
-            setApiMessage('Language engine responded but looks unhealthy')
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          setApiStatus('down')
-          setApiMessage('Cannot reach language engine')
-        }
-      }
-    }
+  const counts = useMemo(() => {
+    const c = suggestions.filter(s => s.severity === 'critical').length;
+    const w = suggestions.filter(s => s.severity === 'warning').length;
+    const i = suggestions.filter(s => s.severity === 'info').length;
+    return { c, w, i, total: suggestions.length };
+  }, [suggestions]);
 
-    ping()
-    const id = window.setInterval(ping, 15000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [])
+  function applySuggestion(s: Suggestion) {
+    if (!s.apply) return;
+    const next = s.apply(text);
+    setText(next);
 
-  const statusPill = useMemo(() => {
-    if (apiStatus === 'checking') {
-      return (
-        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-slate-400" />
-          checking
-        </span>
-      )
-    }
-    if (apiStatus === 'ok') {
-      return (
-        <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          online
-        </span>
-      )
-    }
-    return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-2.5 py-1 text-xs text-rose-700">
-        <span className="h-2 w-2 rounded-full bg-rose-500" />
-        offline
-      </span>
-    )
-  }, [apiStatus])
+    // Keep cursor usable
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }
 
   return (
-    <div className="min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-[1400px]">
-        {/* Left nav (Grammarly-ish) */}
-        <aside className="hidden w-[280px] shrink-0 border-r border-slate-200 bg-white lg:block">
-          <div className="flex h-full flex-col">
-            <div className="px-5 py-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">UpCube Writer</div>
-                  <div className="text-xs text-slate-500">Smart writing assistant</div>
-                </div>
-                {statusPill}
-              </div>
+    <div className="h-screen w-screen bg-app flex flex-col text-ink">
+      <TopBar
+        title={docTitle}
+        onTitleChange={setDocTitle}
+        status={status}
+        counts={counts}
+      />
 
-              <div className="mt-3 text-xs text-slate-500">{apiMessage}</div>
-            </div>
-
-            <div className="px-3">
-              <nav className="space-y-1">
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50">
-                  Docs
-                </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50">
-                  Templates
-                </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50">
-                  Tone & Style
-                </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-800 hover:bg-slate-50">
-                  Settings
-                </button>
-              </nav>
-            </div>
-
-            <div className="mt-auto border-t border-slate-200 px-5 py-4 text-xs text-slate-500">
-              Powered by UpCube Language Engine
-            </div>
-          </div>
-        </aside>
-
-        {/* Main */}
-        <main className="flex min-w-0 flex-1 flex-col">
-          {/* Top bar */}
-          <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
-            <div className="flex items-center justify-between px-4 py-3 md:px-6">
-              <div className="flex items-center gap-3">
-                <div className="lg:hidden">
-                  <div className="text-sm font-semibold text-slate-900">UpCube Writer</div>
-                  <div className="text-xs text-slate-500">Smart writing assistant</div>
-                </div>
-                <div className="hidden lg:block text-sm text-slate-500">Write, refine, and apply suggestions.</div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="hidden sm:block">{statusPill}</div>
-                <a
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                  href="https://docs.upcube.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Docs
-                </a>
-              </div>
-            </div>
-          </header>
-
-          {/* Content */}
-          <div className="flex-1 px-4 py-6 md:px-6">
-            <div className="mx-auto max-w-[1100px]">
-              <div className="rounded-2xl bg-white p-4 shadow-soft ring-1 ring-slate-200 md:p-6">
-                <Editor apiBase={API_BASE} />
-              </div>
-
-              {apiStatus === 'down' && (
-                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-                  Your language engine is offline. The editor still works, but suggestions may fail until the backend is
-                  reachable.
-                </div>
-              )}
-            </div>
-          </div>
-        </main>
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar active={activeNav} onChange={setActiveNav} />
+        <MainShell>
+          <EditorAndSuggestions
+            status={status}
+            text={text}
+            setText={setText}
+            textareaRef={textareaRef}
+            suggestions={suggestions}
+            onApply={applySuggestion}
+          />
+        </MainShell>
       </div>
     </div>
-  )
-} 
+  );
+}
+
+/* ----------------------------- Layout Pieces ----------------------------- */
+
+function TopBar({
+  title,
+  onTitleChange,
+  status,
+  counts,
+}: {
+  title: string;
+  onTitleChange: (v: string) => void;
+  status: Status;
+  counts: { c: number; w: number; i: number; total: number };
+}) {
+  return (
+    <header className="h-12 bg-surface border-b border-line flex items-center px-4 md:px-6 gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="h-7 w-7 rounded-md bg-neutral-100 border border-line" />
+        <input
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          className="min-w-0 bg-transparent outline-none font-semibold text-sm md:text-[13.5px] text-ink px-2 py-1 rounded-md hover:bg-neutral-50 focus:bg-white focus:ring-2 focus:ring-focus"
+        />
+      </div>
+
+      <div className="ml-auto flex items-center gap-2">
+        <StatusPill status={status} />
+        <MiniCounts counts={counts} />
+
+        <button className="btn-ghost hidden sm:inline-flex">Docs</button>
+        <button className="btn-primary hidden sm:inline-flex">Share</button>
+
+        <div className="h-8 w-8 rounded-full bg-neutral-100 border border-line" />
+      </div>
+    </header>
+  );
+}
+
+function StatusPill({ status }: { status: Status }) {
+  const isOnline = status === 'online';
+  return (
+    <div className={`pill ${isOnline ? 'pill-online' : 'pill-offline'}`}>
+      <span className={`dot ${isOnline ? 'dot-online' : 'dot-offline'}`} />
+      <span className="text-[12px] font-medium">{isOnline ? 'online' : 'offline'}</span>
+    </div>
+  );
+}
+
+function MiniCounts({ counts }: { counts: { c: number; w: number; i: number; total: number } }) {
+  if (counts.total === 0) return null;
+  return (
+    <div className="hidden md:flex items-center gap-2 px-2">
+      {counts.c > 0 && <Badge tone="critical">{counts.c} critical</Badge>}
+      {counts.w > 0 && <Badge tone="warning">{counts.w} warnings</Badge>}
+      {counts.i > 0 && <Badge tone="info">{counts.i} tips</Badge>}
+    </div>
+  );
+}
+
+function Badge({
+  tone,
+  children,
+}: {
+  tone: 'critical' | 'warning' | 'info';
+  children: React.ReactNode;
+}) {
+  const cls =
+    tone === 'critical'
+      ? 'bg-red-50 text-red-700 border-red-200'
+      : tone === 'warning'
+      ? 'bg-amber-50 text-amber-700 border-amber-200'
+      : 'bg-blue-50 text-blue-700 border-blue-200';
+
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[12px] ${cls}`}>{children}</span>;
+}
+
+function Sidebar({
+  active,
+  onChange,
+}: {
+  active: string;
+  onChange: (k: string) => void;
+}) {
+  return (
+    <aside className="w-60 bg-surface border-r border-line px-3 py-5 hidden md:flex flex-col">
+      <div className="px-2 pb-4">
+        <div className="text-[12px] text-muted font-medium">Docs</div>
+      </div>
+
+      <nav className="space-y-1">
+        {SIDEBAR_ITEMS.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => onChange(item.key)}
+            className={[
+              'w-full text-left px-3 py-2 rounded-md text-[13px] transition',
+              item.key === active
+                ? 'bg-neutral-100 text-ink font-medium border border-line'
+                : 'text-muted hover:bg-neutral-50 hover:text-ink',
+            ].join(' ')}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mt-auto pt-6 px-2">
+        <div className="text-[11px] text-muted">Powered by UpCube Language Engine</div>
+      </div>
+    </aside>
+  );
+}
+
+function MainShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex-1 overflow-hidden">
+      <div className="h-full overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+/* ----------------------------- Editor + Suggestions ----------------------------- */
+
+function EditorAndSuggestions({
+  status,
+  text,
+  setText,
+  textareaRef,
+  suggestions,
+  onApply,
+}: {
+  status: Status;
+  text: string;
+  setText: (v: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  suggestions: Suggestion[];
+  onApply: (s: Suggestion) => void;
+}) {
+  const [filter, setFilter] = useState<'all' | SuggestionSeverity>('all');
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return suggestions;
+    return suggestions.filter((s) => s.severity === filter);
+  }, [filter, suggestions]);
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Editor column */}
+      <main className="flex-1 overflow-y-auto px-4 sm:px-8 lg:px-12 py-6 lg:py-8">
+        <div className="mx-auto max-w-editor">
+          {/* Header line */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[13px] font-semibold">Your writing</div>
+              <div className="text-[12px] text-muted">Write, refine, and apply suggestions.</div>
+            </div>
+
+            {/* Mobile status pill */}
+            <div className="md:hidden">
+              <StatusPill status={status} />
+            </div>
+          </div>
+
+          {/* Editor card */}
+          <div className="card p-5 sm:p-6">
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Start typing or paste your text here..."
+              className="w-full min-h-[340px] resize-none outline-none bg-transparent text-[15px] leading-relaxed placeholder:text-neutral-400"
+            />
+          </div>
+
+          {/* Footer helper */}
+          <div className="mt-3 text-[12px] text-muted">
+            Tip: paste a paragraph to see structured suggestions.
+          </div>
+
+          {/* Offline banner like your screenshot */}
+          {status === 'offline' && (
+            <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+              Your language engine is offline. The editor still works, but suggestions may be limited until the backend is reachable.
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Suggestions column */}
+      <aside className="w-80 lg:w-96 border-l border-line bg-surface hidden sm:flex flex-col">
+        <div className="px-4 py-4 border-b border-line">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[13px] font-semibold">Suggestions</div>
+              <div className="text-[12px] text-muted">Clear, actionable edits.</div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as any)}
+                className="text-[12px] bg-white border border-line rounded-md px-2 py-1 outline-none focus:ring-2 focus:ring-focus"
+              >
+                <option value="all">All</option>
+                <option value="critical">Critical</option>
+                <option value="warning">Warnings</option>
+                <option value="info">Tips</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {filtered.length === 0 ? (
+            <EmptySuggestions />
+          ) : (
+            <div className="space-y-3">
+              {filtered.map((s) => (
+                <SuggestionCard key={s.id} s={s} onApply={() => onApply(s)} />
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/* ----------------------------- Suggestion Cards ----------------------------- */
+
+function SuggestionCard({ s, onApply }: { s: Suggestion; onApply: () => void }) {
+  const severityLabel =
+    s.severity === 'critical' ? 'Critical' : s.severity === 'warning' ? 'Warning' : 'Tip';
+
+  const toneCls =
+    s.severity === 'critical'
+      ? 'border-red-200 bg-red-50 text-red-700'
+      : s.severity === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-blue-200 bg-blue-50 text-blue-700';
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] ${toneCls}`}>
+              {severityLabel}
+            </span>
+            <span className="text-[13px] font-semibold text-ink truncate">{s.title}</span>
+          </div>
+          <div className="text-[12.5px] text-muted leading-snug">{s.detail}</div>
+        </div>
+      </div>
+
+      {(s.before || s.after) && (
+        <div className="mt-3 rounded-md border border-line bg-white p-3 text-[12px]">
+          {s.before && (
+            <div className="mb-2">
+              <div className="text-[11px] text-muted mb-1">Before</div>
+              <div className="text-ink">{s.before}</div>
+            </div>
+          )}
+          {s.after && (
+            <div>
+              <div className="text-[11px] text-muted mb-1">After</div>
+              <div className="text-ink">{s.after}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button className="btn-ghost">Dismiss</button>
+        <button
+          className={`btn ${
+            s.severity === 'critical'
+              ? 'btn-danger'
+              : s.severity === 'warning'
+              ? 'btn-warn'
+              : 'btn-primary'
+          }`}
+          onClick={onApply}
+          disabled={!s.apply}
+          title={!s.apply ? 'No automatic apply available' : 'Apply this change'}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EmptySuggestions() {
+  return (
+    <div className="pt-6">
+      <div className="text-[13px] font-semibold text-ink mb-1">Nothing to show yet</div>
+      <div className="text-[12.5px] text-muted mb-4">
+        Add a paragraph to get clarity, tone, and grammar suggestions.
+      </div>
+
+      <div className="space-y-3">
+        <div className="card p-4">
+          <div className="text-[12px] text-muted mb-2">Try pasting something like:</div>
+          <div className="text-[12.5px] text-ink leading-snug">
+            “I want to build a clean writing assistant interface that feels calm and focused.”
+          </div>
+        </div>
+
+        <div className="card p-4">
+          <div className="text-[12px] text-muted mb-2">Or test a rough draft:</div>
+          <div className="text-[12.5px] text-ink leading-snug">
+            “im trying to make this better but my wording is not good and its confusing.”
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Simple “AI” Suggestion Engine ----------------------------- */
+/**
+ * This is intentionally lightweight and deterministic.
+ * Replace later with your real backend.
+ */
+function buildSuggestions(text: string): Suggestion[] {
+  const t = text ?? '';
+  const out: Suggestion[] = [];
+
+  const hasText = t.trim().length > 0;
+  if (!hasText) return out;
+
+  // 1) Common quick wins: capitalization of "i"
+  if (/\bi\b/.test(t)) {
+    out.push({
+      id: 'cap-i',
+      severity: 'warning',
+      title: 'Capitalize “I”',
+      detail: 'Capitalizing the first-person pronoun improves professionalism and readability.',
+      before: 'i am working on this...',
+      after: 'I am working on this...',
+      apply: (s) => s.replace(/\bi\b/g, 'I'),
+    });
+  }
+
+  // 2) Double spaces
+  if (/ {2,}/.test(t)) {
+    out.push({
+      id: 'double-space',
+      severity: 'info',
+      title: 'Remove extra spaces',
+      detail: 'Extra spaces can make your writing feel uneven.',
+      before: 'This  has  extra spaces.',
+      after: 'This has extra spaces.',
+      apply: (s) => s.replace(/ {2,}/g, ' '),
+    });
+  }
+
+  // 3) Very long sentence heuristic
+  const longSent = t.split(/[.!?]\s/).find((s) => s.trim().split(/\s+/).length > 30);
+  if (longSent) {
+    out.push({
+      id: 'long-sentence',
+      severity: 'warning',
+      title: 'Consider splitting a long sentence',
+      detail: 'Long sentences can be harder to follow. Split it into two clear thoughts.',
+      before: truncate(longSent.trim(), 110),
+      after: 'Split into two shorter sentences for clarity.',
+    });
+  }
+
+  // 4) Weak opener heuristic
+  if (/^(so|okay|ok|well)\b/i.test(t.trim())) {
+    out.push({
+      id: 'opener',
+      severity: 'info',
+      title: 'Strengthen your opening line',
+      detail: 'Starting with a direct statement sets a confident tone.',
+      before: truncate(t.trim(), 80),
+      after: 'Try opening with the core point you want to convey.',
+    });
+  }
+
+  // 5) “im” -> “I’m”
+  if (/\bim\b/i.test(t)) {
+    out.push({
+      id: 'im-contraction',
+      severity: 'critical',
+      title: 'Fix contraction “I’m”',
+      detail: 'Correct contractions improve clarity and reduce friction for readers.',
+      before: 'im working on it',
+      after: 'I’m working on it',
+      apply: (s) => s.replace(/\bim\b/gi, "I'm"),
+    });
+  }
+
+  // 6) Too many exclamation marks
+  if (/!{2,}/.test(t)) {
+    out.push({
+      id: 'exclaim',
+      severity: 'warning',
+      title: 'Reduce repeated exclamation marks',
+      detail: 'A single exclamation mark is usually enough.',
+      before: 'This is amazing!!!',
+      after: 'This is amazing!',
+      apply: (s) => s.replace(/!{2,}/g, '!'),
+    });
+  }
+
+  return out.slice(0, 10);
+}
+
+function truncate(s: string, n: number) {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + '…';
+}
+

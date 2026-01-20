@@ -2,28 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Nice defaults */
-:root {
-  color-scheme: light;
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+      "Segoe UI Emoji";
+  }
+
+  ::selection {
+    @apply bg-indigo-200;
+  }
 }
 
-html,
-body {
-  height: 100%;
+@layer utilities {
+  .shadow-soft {
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.06),
+      0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .ring-soft {
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15), 0 10px 30px rgba(99, 102, 241, 0.10);
+  }
 }
 
-body {
-  margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial,
-    "Apple Color Emoji", "Segoe UI Emoji";
-}
-
-* {
-  box-sizing: border-box;
-}
-
-/* TipTap editor tweaks */
-.ProseMirror {
-  outline: none;
-  white-space: pre-wrap;
-}

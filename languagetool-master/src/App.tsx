@@ -27,10 +27,12 @@ function escapeHtml(s: string) {
 
 function useDebounced<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
+
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delayMs);
     return () => clearTimeout(t);
   }, [value, delayMs]);
+
   return debounced;
 }
 
@@ -38,6 +40,7 @@ function computeStats(text: string) {
   const words = (text.trim().match(/\S+/g) || []).length;
   const chars = text.length;
   const sentences = (text.match(/[.!?]+/g) || []).length;
+
   return { words, chars, sentences };
 }
 
@@ -76,7 +79,7 @@ function renderHighlightedText(text: string, matches: LTMatch[]) {
     result += `
       <span
         data-idx="${i}"
-        class="underline decoration-amber-400 decoration-2 cursor-pointer bg-amber-100/50 rounded-sm transition-colors hover:bg-amber-200/60"
+        class="underline decoration-amber-400 decoration-2 cursor-pointer bg-amber-100/40 rounded-sm transition-colors hover:bg-amber-200/60"
       >
         ${escapeHtml(text.slice(m.offset, m.offset + m.length))}
       </span>
@@ -148,6 +151,12 @@ export default function App() {
     info: "border-l-4 border-sky-400 bg-sky-50",
   };
 
+  const severityLabels: Record<string, string> = {
+    error: "Critical Issue",
+    style: "Style Suggestion",
+    info: "Improvement",
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex">
       <aside className="w-[250px] border-r bg-white p-5">
@@ -155,14 +164,18 @@ export default function App() {
           <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">
             U
           </div>
+
           <div>
             <div className="font-semibold text-lg">UpCube Writer</div>
-            <div className="text-xs text-slate-500">AI Writing Assistant</div>
+            <div className="text-xs text-slate-500">
+              Smart Writing Assistant
+            </div>
           </div>
         </div>
 
         <div className="mb-5">
           <label className="text-xs text-slate-500">Writing Language</label>
+
           <select
             className="w-full mt-1 border rounded-xl p-2 text-sm focus:ring-2 focus:ring-indigo-200 outline-none"
             value={language}
@@ -216,24 +229,23 @@ export default function App() {
           </section>
 
           <aside className="w-[380px] border-l bg-white p-5 overflow-auto">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-[15px]">
-                Improvements
-              </h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-[16px]">Suggestions</h3>
 
               {loading && (
                 <div className="flex items-center gap-2 text-sm">
                   <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
-                  Reviewing your text…
+                  Analyzing…
                 </div>
               )}
             </div>
 
             {!loading && matches.length === 0 && !error && (
-              <div className="text-center mt-12 text-slate-600">
-                <div className="text-xl font-semibold">Looks great 🎉</div>
+              <div className="text-center mt-16 text-slate-600">
+                <div className="text-2xl font-semibold">All Clear 🎉</div>
+
                 <div className="text-sm mt-2">
-                  No improvements found. Keep up the strong writing.
+                  Your writing looks polished and professional.
                 </div>
               </div>
             )}
@@ -249,8 +261,14 @@ export default function App() {
                     severityStyles[sev]
                   } ${i === selectedIdx ? "ring-2 ring-indigo-200" : ""}`}
                 >
-                  <div className="font-medium text-[15px]">
-                    {m.shortMessage || m.message}
+                  <div className="flex justify-between items-start">
+                    <div className="font-medium text-[15px]">
+                      {i + 1}. {m.shortMessage || m.message}
+                    </div>
+
+                    <span className="text-xs px-2 py-1 bg-white border rounded-full">
+                      {severityLabels[sev]}
+                    </span>
                   </div>
 
                   <div className="text-[13px] mt-1 text-slate-600">
@@ -274,7 +292,7 @@ export default function App() {
             {selected && (
               <div className="mt-6 border rounded-2xl p-4 bg-slate-50">
                 <h4 className="font-semibold mb-3 text-sm">
-                  Use Suggestion
+                  Apply Correction
                 </h4>
 
                 {selected.replacements.slice(0, 5).map((r) => (
@@ -286,6 +304,13 @@ export default function App() {
                     Replace with: <b>{r.value}</b>
                   </button>
                 ))}
+
+                <button
+                  onClick={() => setSelectedIdx(-1)}
+                  className="mt-2 text-xs text-slate-500 hover:text-slate-800"
+                >
+                  Ignore this suggestion
+                </button>
               </div>
             )}
           </aside>

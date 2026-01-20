@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Editor from "./Editor";
 
 type LTReplacement = { value: string };
 type LTContext = { text: string; offset: number; length: number };
@@ -103,7 +104,6 @@ export default function App() {
   const debouncedText = useDebounced(text, 600);
   const stats = useMemo(() => computeStats(text), [text]);
 
-  const editorRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -130,12 +130,6 @@ export default function App() {
     return () => ac.abort();
   }, [debouncedText, language]);
 
-  useEffect(() => {
-    if (editorRef.current) {
-      editorRef.current.innerHTML = renderHighlightedText(text, matches);
-    }
-  }, [matches, text]);
-
   function applyFix(replacement: string) {
     const m = matches[selectedIdx];
     if (!m) return;
@@ -144,13 +138,6 @@ export default function App() {
     const after = text.slice(m.offset + m.length);
 
     setText(before + replacement + after);
-  }
-
-  function handleEditorClick(e: React.MouseEvent) {
-    const target = e.target as HTMLElement;
-    const idx = target.getAttribute("data-idx");
-
-    if (idx) setSelectedIdx(Number(idx));
   }
 
   const selected = matches[selectedIdx];
@@ -163,7 +150,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex">
-      {/* LEFT NAV */}
       <aside className="w-[250px] border-r bg-white p-5">
         <div className="flex items-center gap-3 mb-8">
           <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">
@@ -194,7 +180,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN AREA */}
       <main className="flex-1 flex flex-col">
         <header className="h-16 bg-white border-b flex items-center px-6 justify-between">
           <input
@@ -215,17 +200,12 @@ export default function App() {
         </header>
 
         <div className="flex flex-1">
-          {/* EDITOR */}
           <section className="flex-1 p-6">
-            <div
-              ref={editorRef}
-              onClick={handleEditorClick}
-              contentEditable
-              suppressContentEditableWarning
-              onInput={(e) =>
-                setText((e.target as HTMLDivElement).innerText)
-              }
-              className="w-full min-h-[520px] bg-white border rounded-2xl p-5 outline-none leading-[1.9] text-[16px] shadow-sm focus:ring-2 focus:ring-indigo-100"
+            <Editor
+              content={text}
+              onChange={setText}
+              highlights={renderHighlightedText(text, matches)}
+              onWordClick={(idx) => setSelectedIdx(idx)}
             />
 
             {error && (
@@ -235,7 +215,6 @@ export default function App() {
             )}
           </section>
 
-          {/* SUGGESTIONS PANEL */}
           <aside className="w-[380px] border-l bg-white p-5 overflow-auto">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-[15px]">

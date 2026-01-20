@@ -14,6 +14,37 @@ type Suggestion = {
   apply?: (text: string) => string;
 };
 
+<<<<<<< HEAD
+type LTReplacement = { value: string };
+type LTMatch = {
+  message: string;
+  shortMessage?: string;
+  offset: number;
+  length: number;
+  replacements: LTReplacement[];
+  rule?: {
+    id?: string;
+    description?: string;
+    issueType?: string; // e.g. "misspelling", "grammar", "style"
+  };
+  context?: {
+    text?: string;
+    offset?: number;
+    length?: number;
+  };
+};
+
+type LTCheckPayload = {
+  ok: boolean;
+  status?: number;
+  error?: string;
+  data?: {
+    matches?: LTMatch[];
+  } | null;
+};
+
+=======
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
 const SIDEBAR_ITEMS = [
   { key: 'docs', label: 'Docs' },
   { key: 'templates', label: 'Templates' },
@@ -29,6 +60,64 @@ export default function App() {
   const [docTitle, setDocTitle] = useState('Untitled doc');
   const [text, setText] = useState('');
 
+<<<<<<< HEAD
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [isChecking, setIsChecking] = useState(false);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    // Real healthcheck against our server-side proxy.
+    (async () => {
+      try {
+        const res = await fetch('/api/lt/health', { method: 'GET' });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+        setStatus(json?.ok ? 'online' : 'offline');
+      } catch {
+        setStatus('offline');
+      }
+    })();
+  }, []);
+
+  // Debounced suggestion fetch. Falls back to local heuristics when offline.
+  useEffect(() => {
+    if (status !== 'online') {
+      setSuggestions(buildSuggestions(text));
+      return;
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setSuggestions([]);
+      return;
+    }
+
+    const t = window.setTimeout(async () => {
+      setIsChecking(true);
+      try {
+        const res = await fetch('/api/lt/check', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: trimmed, language: 'auto' }),
+        });
+        const payload = (await res.json().catch(() => null)) as LTCheckPayload | null;
+
+        if (!payload?.ok || !payload.data?.matches) {
+          setSuggestions(buildSuggestions(text));
+          return;
+        }
+
+        setSuggestions(mapLanguageToolMatchesToSuggestions(payload.data.matches, text));
+      } catch {
+        setSuggestions(buildSuggestions(text));
+      } finally {
+        setIsChecking(false);
+      }
+    }, 450);
+
+    return () => window.clearTimeout(t);
+  }, [text, status]);
+=======
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -38,6 +127,7 @@ export default function App() {
   }, []);
 
   const suggestions = useMemo(() => buildSuggestions(text), [text]);
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
 
   const counts = useMemo(() => {
     const c = suggestions.filter(s => s.severity === 'critical').length;
@@ -75,6 +165,10 @@ export default function App() {
             setText={setText}
             textareaRef={textareaRef}
             suggestions={suggestions}
+<<<<<<< HEAD
+            isChecking={isChecking}
+=======
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
             onApply={applySuggestion}
           />
         </MainShell>
@@ -211,6 +305,10 @@ function EditorAndSuggestions({
   setText,
   textareaRef,
   suggestions,
+<<<<<<< HEAD
+  isChecking,
+=======
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
   onApply,
 }: {
   status: Status;
@@ -218,6 +316,10 @@ function EditorAndSuggestions({
   setText: (v: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   suggestions: Suggestion[];
+<<<<<<< HEAD
+  isChecking: boolean;
+=======
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
   onApply: (s: Suggestion) => void;
 }) {
   const [filter, setFilter] = useState<'all' | SuggestionSeverity>('all');
@@ -296,7 +398,15 @@ function EditorAndSuggestions({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {filtered.length === 0 ? (
+<<<<<<< HEAD
+            isChecking ? (
+              <div className="text-[12.5px] text-muted">Checking…</div>
+            ) : (
+              <EmptySuggestions />
+            )
+=======
             <EmptySuggestions />
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
           ) : (
             <div className="space-y-3">
               {filtered.map((s) => (
@@ -310,6 +420,39 @@ function EditorAndSuggestions({
   );
 }
 
+<<<<<<< HEAD
+function mapLanguageToolMatchesToSuggestions(matches: LTMatch[], fullText: string): Suggestion[] {
+  // Keep stable ordering: earliest match first.
+  const sorted = [...matches].sort((a, b) => a.offset - b.offset);
+
+  return sorted.map((m, idx) => {
+    const id = `${m.rule?.id || 'match'}-${m.offset}-${m.length}-${idx}`;
+    const issueType = (m.rule?.issueType || '').toLowerCase();
+
+    const severity: SuggestionSeverity =
+      issueType === 'misspelling' || issueType === 'grammar'
+        ? 'critical'
+        : issueType === 'style'
+        ? 'warning'
+        : 'info';
+
+    const title = m.shortMessage || m.rule?.description || m.rule?.id || 'Suggestion';
+    const detail = m.message || 'Possible improvement.';
+
+    const before = fullText.slice(m.offset, m.offset + m.length);
+    const bestReplacement = m.replacements?.[0]?.value;
+    const after = bestReplacement || undefined;
+
+    const apply = bestReplacement
+      ? (current: string) => current.slice(0, m.offset) + bestReplacement + current.slice(m.offset + m.length)
+      : undefined;
+
+    return { id, severity, title, detail, before, after, apply };
+  });
+}
+
+=======
+>>>>>>> 50a93b787304291edc300f2614b23c420e8b3787
 /* ----------------------------- Suggestion Cards ----------------------------- */
 
 function SuggestionCard({ s, onApply }: { s: Suggestion; onApply: () => void }) {

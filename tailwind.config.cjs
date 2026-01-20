@@ -1,10 +1,14 @@
 /** @type {import('tailwindcss').Config} */
-export default {
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+module.exports = {
+  content: [
+    './index.html',
+    './*.{js,ts,jsx,tsx}',      // root files (your project)
+    './**/*.{js,ts,jsx,tsx}',   // any future folders you add
+  ],
   theme: {
     extend: {
       maxWidth: {
-        editor: '48rem', // Grammarly-like centered editor width
+        editor: '48rem',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
@@ -26,5 +30,6 @@ export default {
     },
   },
   plugins: [],
-};
+}
+
 

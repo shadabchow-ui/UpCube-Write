@@ -14,7 +14,6 @@ type Suggestion = {
   apply?: (text: string) => string;
 };
 
- HEAD
 type LTReplacement = { value: string };
 type LTMatch = {
   message: string;
@@ -43,8 +42,6 @@ type LTCheckPayload = {
   } | null;
 };
 
-
- 50a93b787304291edc300f2614b23c420e8b3787
 const SIDEBAR_ITEMS = [
   { key: 'docs', label: 'Docs' },
   { key: 'templates', label: 'Templates' },
@@ -60,7 +57,6 @@ export default function App() {
   const [docTitle, setDocTitle] = useState('Untitled doc');
   const [text, setText] = useState('');
 
- HEAD
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isChecking, setIsChecking] = useState(false);
 
@@ -118,17 +114,6 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [text, status]);
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    // Example: pretend we “ping” and stay offline for now.
-    // Replace with your real /health endpoint check.
-    setStatus('offline');
-  }, []);
-
-  const suggestions = useMemo(() => buildSuggestions(text), [text]);
- 50a93b787304291edc300f2614b23c420e8b3787
-
   const counts = useMemo(() => {
     const c = suggestions.filter(s => s.severity === 'critical').length;
     const w = suggestions.filter(s => s.severity === 'warning').length;
@@ -165,10 +150,7 @@ export default function App() {
             setText={setText}
             textareaRef={textareaRef}
             suggestions={suggestions}
- HEAD
             isChecking={isChecking}
-
- 50a93b787304291edc300f2614b23c420e8b3787
             onApply={applySuggestion}
           />
         </MainShell>
@@ -305,10 +287,7 @@ function EditorAndSuggestions({
   setText,
   textareaRef,
   suggestions,
- HEAD
   isChecking,
-
- 50a93b787304291edc300f2614b23c420e8b3787
   onApply,
 }: {
   status: Status;
@@ -316,10 +295,7 @@ function EditorAndSuggestions({
   setText: (v: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   suggestions: Suggestion[];
- HEAD
   isChecking: boolean;
-
- 50a93b787304291edc300f2614b23c420e8b3787
   onApply: (s: Suggestion) => void;
 }) {
   const [filter, setFilter] = useState<'all' | SuggestionSeverity>('all');
@@ -398,15 +374,11 @@ function EditorAndSuggestions({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {filtered.length === 0 ? (
- HEAD
             isChecking ? (
               <div className="text-[12.5px] text-muted">Checking…</div>
             ) : (
               <EmptySuggestions />
             )
-
-            <EmptySuggestions />
- 50a93b787304291edc300f2614b23c420e8b3787
           ) : (
             <div className="space-y-3">
               {filtered.map((s) => (
@@ -420,7 +392,6 @@ function EditorAndSuggestions({
   );
 }
 
- HEAD
 function mapLanguageToolMatchesToSuggestions(matches: LTMatch[], fullText: string): Suggestion[] {
   // Keep stable ordering: earliest match first.
   const sorted = [...matches].sort((a, b) => a.offset - b.offset);
@@ -451,8 +422,6 @@ function mapLanguageToolMatchesToSuggestions(matches: LTMatch[], fullText: strin
   });
 }
 
-
- 50a93b787304291edc300f2614b23c420e8b3787
 /* ----------------------------- Suggestion Cards ----------------------------- */
 
 function SuggestionCard({ s, onApply }: { s: Suggestion; onApply: () => void }) {

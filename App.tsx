@@ -1,310 +1,461 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Editor from "./Editor";
-
-type LTReplacement = { value: string };
-type LTContext = { text: string; offset: number; length: number };
+import "./index.css";
 
 type LTMatch = {
   message: string;
   shortMessage?: string;
   offset: number;
   length: number;
-  context: LTContext;
+  replacements: { value: string }[];
   rule?: { issueType?: string; category?: { name?: string } };
-  replacements: LTReplacement[];
 };
 
-const API_BASE =
-  (import.meta as any).env?.VITE_LT_API_BASE?.toString() ||
-  "https://languagetool-master.fly.dev";
+type DocItem = {
+  id: string;
+  title: string;
+  text: string;
+  updatedAt: number;
+};
+
+const STORAGE_KEY = "upcube_write_docs_v1";
+
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function useDebounced<T>(value: T, delayMs: number) {
-  const [debounced, setDebounced] = useState(value);
+function getWordRangeAt(text: string, idx: number) {
+  const safe = clamp(idx, 0, Math.max(0, text.length - 1));
+  let start = safe;
+  let end = safe;
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(t);
-  }, [value, delayMs]);
+  while (start > 0 && /\S/.test(text[start - 1])) start--;
+  while (end < text.length && /\S/.test(text[end])) end++;
 
-  return debounced;
+  return { start, end };
 }
 
-function computeStats(text: string) {
-  const words = (text.trim().match(/\S+/g) || []).length;
-  const chars = text.length;
-  const sentences = (text.match(/[.!?]+/g) || []).length;
-  return { words, chars, sentences };
+function replaceRange(text: string, start: number, end: number, replacement: string) {
+  return text.slice(0, start) + replacement + text.slice(end);
 }
 
-async function ltCheck(text: string, language: string, signal?: AbortSignal) {
-  const body = new URLSearchParams();
-  body.set("text", text);
-  body.set("language", language);
+function buildHighlightedHtml(text: string, matches: LTMatch[], selectedIdx: number | null) {
+  // Convert offsets into non-overlapping spans (LanguageTool usually doesn't overlap, but be safe)
+  const spans = matches
+    .map((m, i) => ({ ...m, _i: i }))
+    .sort((a, b) => a.offset - b.offset);
 
-  const res = await fetch(`${API_BASE}/v2/check`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    signal,
-  });
+  let out = "";
+  let cursor = 0;
 
-  if (!res.ok) throw new Error("Language service unavailable");
+  for (const s of spans) {
+    const start = clamp(s.offset, 0, text.length);
+    const end = clamp(s.offset + s.length, 0, text.length);
+    if (end <= cursor) continue; // overlap/invalid
 
-  const json = await res.json();
-  return (json.matches || []) as LTMatch[];
-}
+    // normal chunk
+    out += escapeHtml(text.slice(cursor, start));
 
-function getSeverity(match: LTMatch) {
-  const t = match.rule?.issueType || "";
-  if (t === "misspelling" || t === "grammar") return "error";
-  if (t === "style") return "style";
-  return "info";
-}
+    // highlighted chunk
+    const chunk = escapeHtml(text.slice(start, end));
+    const isSelected = selectedIdx === s._i;
 
-function renderHighlightedText(text: string, matches: LTMatch[]) {
-  let result = "";
-  let lastIndex = 0;
+    out += `<span class="hlt-word ${isSelected ? "is-selected" : ""}" data-idx="${s._i}">${chunk}</span>`;
 
-  matches.forEach((m, i) => {
-    result += escapeHtml(text.slice(lastIndex, m.offset));
+    cursor = end;
+  }
 
-    result += `
-      <span data-idx="${i}" class="ucw-highlight">
-        ${escapeHtml(text.slice(m.offset, m.offset + m.length))}
-      </span>
-    `;
+  out += escapeHtml(text.slice(cursor));
 
-    lastIndex = m.offset + m.length;
-  });
-
-  result += escapeHtml(text.slice(lastIndex));
-  return result;
+  // Preserve line breaks in HTML
+  return out.replaceAll("\n", "<br/>");
 }
 
 export default function App() {
-  const [docTitle, setDocTitle] = useState("Untitled Document");
-  const [language, setLanguage] = useState("en-US");
-  const [text, setText] = useState(
-    "This are bad sentence.\n\nWelcome to UpCube Writer — your writing assistant."
-  );
-
-  const [matches, setMatches] = useState<LTMatch[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState<number>(-1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const debouncedText = useDebounced(text, 600);
-  const stats = useMemo(() => computeStats(text), [text]);
-
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (debouncedText.trim().length < 3) {
-      setMatches([]);
-      setSelectedIdx(-1);
-      return;
+  const [docs, setDocs] = useState<DocItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        const initial: DocItem = {
+          id: uid(),
+          title: "Untitled document",
+          text: "This are bad sentence. Welcome to UpCube Writer — your AI-powered writing assistant.",
+          updatedAt: Date.now(),
+        };
+        return [initial];
+      }
+      const parsed = JSON.parse(raw) as DocItem[];
+      return Array.isArray(parsed) && parsed.length ? parsed : [];
+    } catch {
+      return [];
     }
+  });
 
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
+  const [activeId, setActiveId] = useState<string>(() => (docs[0]?.id ? docs[0].id : ""));
+  const activeDoc = useMemo(() => docs.find((d) => d.id === activeId) ?? docs[0], [docs, activeId]);
 
-    setLoading(true);
-    setError(null);
+  const [language, setLanguage] = useState("en-US");
+  const [matches, setMatches] = useState<LTMatch[]>([]);
+  const [selectedMatchIdx, setSelectedMatchIdx] = useState<number | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [status, setStatus] = useState<string>("");
 
-    ltCheck(debouncedText, language, ac.signal)
-      .then((m) => {
-        setMatches(m);
-        setSelectedIdx(m.length ? 0 : -1);
-      })
-      .catch(() => setError("Unable to review your text right now"))
-      .finally(() => setLoading(false));
+  const activeText = activeDoc?.text ?? "";
 
-    return () => ac.abort();
-  }, [debouncedText, language]);
+  // persist docs
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+    } catch {
+      // ignore
+    }
+  }, [docs]);
 
-  function applyFix(replacement: string) {
-    const m = matches[selectedIdx];
+  // keep activeId valid
+  useEffect(() => {
+    if (!docs.length) return;
+    if (!activeId || !docs.some((d) => d.id === activeId)) {
+      setActiveId(docs[0].id);
+    }
+  }, [docs, activeId]);
+
+  const highlightedHtml = useMemo(() => {
+    return buildHighlightedHtml(activeText, matches, selectedMatchIdx);
+  }, [activeText, matches, selectedMatchIdx]);
+
+  function updateActiveDoc(patch: Partial<DocItem>) {
+    if (!activeDoc) return;
+    setDocs((prev) =>
+      prev.map((d) =>
+        d.id === activeDoc.id
+          ? {
+              ...d,
+              ...patch,
+              updatedAt: Date.now(),
+            }
+          : d
+      )
+    );
+  }
+
+  function newDoc() {
+    const doc: DocItem = {
+      id: uid(),
+      title: "Untitled document",
+      text: "",
+      updatedAt: Date.now(),
+    };
+    setDocs((prev) => [doc, ...prev]);
+    setActiveId(doc.id);
+    setMatches([]);
+    setSelectedMatchIdx(null);
+    setStatus("");
+  }
+
+  function deleteDoc(id: string) {
+    setDocs((prev) => prev.filter((d) => d.id !== id));
+    setMatches([]);
+    setSelectedMatchIdx(null);
+    setStatus("");
+  }
+
+  async function checkGrammar(text: string) {
+    setIsChecking(true);
+    setStatus("Checking…");
+    setSelectedMatchIdx(null);
+
+    try {
+      // If you later host your own LT API, replace this endpoint.
+      const res = await fetch("https://api.languagetool.org/v2/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          text,
+          language,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`LanguageTool error: ${res.status}`);
+      }
+
+      const data = (await res.json()) as { matches: LTMatch[] };
+      setMatches(Array.isArray(data.matches) ? data.matches : []);
+      setStatus(`Found ${data.matches?.length ?? 0} suggestion(s).`);
+    } catch (e: any) {
+      setMatches([]);
+      setStatus(e?.message ? `Error: ${e.message}` : "Error checking text.");
+    } finally {
+      setIsChecking(false);
+    }
+  }
+
+  // Debounced checking
+  useEffect(() => {
+    if (!activeDoc) return;
+
+    const t = window.setTimeout(() => {
+      const txt = activeDoc.text.trim();
+      if (!txt) {
+        setMatches([]);
+        setSelectedMatchIdx(null);
+        setStatus("");
+        return;
+      }
+      checkGrammar(activeDoc.text);
+    }, 600);
+
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDoc?.text, language]);
+
+  function applyReplacement(matchIdx: number, replacement: string) {
+    if (!activeDoc) return;
+    const m = matches[matchIdx];
     if (!m) return;
 
-    const before = text.slice(0, m.offset);
-    const after = text.slice(m.offset + m.length);
-    setText(before + replacement + after);
+    // Apply to the current text using offsets (best effort)
+    const start = m.offset;
+    const end = m.offset + m.length;
+
+    const next = replaceRange(activeDoc.text, start, end, replacement);
+    updateActiveDoc({ text: next });
+
+    // After apply, clear selection
+    setSelectedMatchIdx(null);
   }
 
-  const selected = selectedIdx >= 0 ? matches[selectedIdx] : undefined;
-
-  function onPickSuggestion(i: number) {
-    setSelectedIdx(i);
+  function ignoreSuggestion(matchIdx: number) {
+    setMatches((prev) => prev.filter((_, i) => i !== matchIdx));
+    setSelectedMatchIdx(null);
   }
 
-  const sevLabel: Record<string, string> = {
-    error: "Critical",
-    style: "Style",
-    info: "Suggestion",
-  };
+  const selected = selectedMatchIdx !== null ? matches[selectedMatchIdx] : null;
+  const selectedReplacements = selected?.replacements ?? [];
 
   return (
-    <div className="ucw-app">
-      <aside className="ucw-sidebar">
-        <div className="ucw-brand">
-          <div className="ucw-logo">U</div>
-          <div>
-            <div className="ucw-brand-title">UpCube Writer</div>
-            <div className="ucw-brand-subtitle">Smart writing assistant</div>
+    <div className="app-shell">
+      {/* Top bar */}
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark">U</div>
+          <div className="brand-meta">
+            <div className="brand-name">UpCube Write</div>
+            <div className="brand-sub">Smart writing assistant</div>
           </div>
         </div>
 
-        <div className="ucw-field">
-          <label className="ucw-label">Writing language</label>
-          <select
-            className="ucw-select"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-          >
-            <option value="en-US">English (US)</option>
-            <option value="en-GB">English (UK)</option>
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-          </select>
-        </div>
-
-        <div className="ucw-muted ucw-footer-note">
-          Powered by UpCube Language Engine
-        </div>
-      </aside>
-
-      <main className="ucw-main">
-        <header className="ucw-topbar">
-          <div className="ucw-doc">
-            <input
-              className="ucw-title-input"
-              value={docTitle}
-              onChange={(e) => setDocTitle(e.target.value)}
-              aria-label="Document title"
-            />
-            <div className="ucw-submeta">
-              {stats.words} words • {stats.sentences} sentences
-            </div>
+        <div className="topbar-actions">
+          <div className="select">
+            <label className="sr-only" htmlFor="lang">
+              Language
+            </label>
+            <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="en-US">English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+            </select>
           </div>
 
-          <div className="ucw-status">
-            <span className="ucw-pill">Live feedback</span>
+          <button className="btn btn-primary" onClick={newDoc}>
+            New doc
+          </button>
+        </div>
+      </header>
+
+      <div className="layout">
+        {/* Left sidebar (docs) */}
+        <aside className="sidebar">
+          <div className="sidebar-head">
+            <div className="sidebar-title">Docs</div>
           </div>
-        </header>
 
-        <div className="ucw-content">
-          <section className="ucw-editorPane">
-            <div className="ucw-card">
-              <Editor
-                content={text}
-                onChange={setText}
-                highlights={renderHighlightedText(text, matches)}
-                onWordClick={(idx) => setSelectedIdx(idx)}
-              />
-            </div>
+          <div className="doclist">
+            {docs.map((d) => (
+              <button
+                key={d.id}
+                className={`docitem ${d.id === activeId ? "is-active" : ""}`}
+                onClick={() => setActiveId(d.id)}
+                type="button"
+              >
+                <div className="docitem-title">{d.title || "Untitled document"}</div>
+                <div className="docitem-meta">
+                  {new Date(d.updatedAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
 
-            {error && (
-              <div className="ucw-alert">
-                <div className="ucw-alert-title">Review failed</div>
-                <div className="ucw-alert-body">{error}</div>
+                <span
+                  className="docitem-trash"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (docs.length > 1) deleteDoc(d.id);
+                  }}
+                  title={docs.length > 1 ? "Delete" : "Keep at least 1 doc"}
+                  role="button"
+                >
+                  ✕
+                </span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        {/* Main editor + suggestions */}
+        <main className="main">
+          <div className="main-grid">
+            {/* Editor column */}
+            <section className="card editor-card">
+              <div className="card-head">
+                <input
+                  className="title-input"
+                  value={activeDoc?.title ?? ""}
+                  onChange={(e) => updateActiveDoc({ title: e.target.value })}
+                  placeholder="Untitled document"
+                />
+
+                <div className="card-head-right">
+                  <div className={`pill ${isChecking ? "is-warn" : matches.length ? "is-good" : "is-muted"}`}>
+                    {isChecking ? "Checking…" : matches.length ? `${matches.length} suggestion(s)` : "No suggestions"}
+                  </div>
+                </div>
               </div>
-            )}
-          </section>
 
-          <aside className="ucw-rightPane">
-            <div className="ucw-rightHeader">
-              <div className="ucw-rightTitle">Suggestions</div>
+              <div className="editor-wrap">
+                <Editor
+                  content={activeText}
+                  onChange={(txt) => updateActiveDoc({ text: txt })}
+                  highlights={highlightedHtml}
+                  onWordClick={(idx) => setSelectedMatchIdx(idx)}
+                />
+              </div>
 
-              {loading ? (
-                <div className="ucw-loading">
-                  <span className="ucw-spinner" />
-                  Analyzing…
+              <div className="status-row">
+                <div className="status-text">{status}</div>
+              </div>
+            </section>
+
+            {/* Suggestions column */}
+            <aside className="card suggestions-card">
+              <div className="card-head">
+                <div className="card-title">Suggestions</div>
+              </div>
+
+              {isChecking ? (
+                <div className="empty">
+                  <div className="spinner" />
+                  <div>Analyzing your writing…</div>
+                </div>
+              ) : matches.length === 0 ? (
+                <div className="empty">
+                  <div className="empty-title">All clear</div>
+                  <div className="empty-sub">Keep typing — suggestions will appear here.</div>
                 </div>
               ) : (
-                <div className="ucw-muted">{matches.length} found</div>
+                <div className="suggestions">
+                  {matches.map((m, i) => {
+                    const title =
+                      m.shortMessage ||
+                      m.rule?.category?.name ||
+                      m.rule?.issueType ||
+                      "Suggestion";
+
+                    return (
+                      <button
+                        key={`${m.offset}-${m.length}-${i}`}
+                        className={`suggestion ${selectedMatchIdx === i ? "is-active" : ""}`}
+                        onClick={() => setSelectedMatchIdx(i)}
+                        type="button"
+                      >
+                        <div className="suggestion-top">
+                          <div className="suggestion-title">{title}</div>
+                          <div className="suggestion-tag">
+                            {(m.rule?.issueType || "issue").toLowerCase()}
+                          </div>
+                        </div>
+                        <div className="suggestion-msg">{m.message}</div>
+
+                        <div className="suggestion-actions">
+                          <button
+                            className="btn btn-ghost"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              ignoreSuggestion(i);
+                            }}
+                            type="button"
+                          >
+                            Ignore
+                          </button>
+
+                          <button
+                            className="btn btn-primary"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const rep = m.replacements?.[0]?.value;
+                              if (rep) applyReplacement(i, rep);
+                            }}
+                            disabled={!m.replacements?.length}
+                            type="button"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </div>
 
-            {!loading && matches.length === 0 && !error && (
-              <div className="ucw-empty">
-                <div className="ucw-emptyTitle">All clear</div>
-                <div className="ucw-emptyBody">
-                  No suggestions right now. Keep writing.
-                </div>
-              </div>
-            )}
+              {/* Details panel for selected suggestion */}
+              {selected && (
+                <div className="detail">
+                  <div className="detail-head">Apply correction</div>
 
-            <div className="ucw-suggestions">
-              {matches.map((m, i) => {
-                const sev = getSeverity(m);
-                const isActive = i === selectedIdx;
-
-                return (
-                  <button
-                    key={i}
-                    className={`ucw-suggestion ${sev} ${
-                      isActive ? "active" : ""
-                    }`}
-                    onClick={() => onPickSuggestion(i)}
-                    type="button"
-                  >
-                    <div className="ucw-suggestionTop">
-                      <div className="ucw-suggestionTitle">
-                        {m.shortMessage || m.message}
-                      </div>
-                      <span className="ucw-tag">{sevLabel[sev]}</span>
+                  {selectedReplacements.length ? (
+                    <div className="replacements">
+                      {selectedReplacements.slice(0, 6).map((r, idx) => (
+                        <button
+                          key={`${r.value}-${idx}`}
+                          className="chip"
+                          onClick={() => {
+                            if (selectedMatchIdx !== null) applyReplacement(selectedMatchIdx, r.value);
+                          }}
+                          type="button"
+                        >
+                          {r.value}
+                        </button>
+                      ))}
                     </div>
-
-                    <div className="ucw-suggestionBody">{m.message}</div>
-
-                    {m.replacements?.length ? (
-                      <div className="ucw-chips">
-                        {m.replacements.slice(0, 3).map((r) => (
-                          <span key={r.value} className="ucw-chip">
-                            {r.value}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            {selected && (
-              <div className="ucw-apply">
-                <div className="ucw-applyTitle">Apply correction</div>
-
-                <div className="ucw-applyList">
-                  {selected.replacements.slice(0, 5).map((r) => (
-                    <button
-                      key={r.value}
-                      className="ucw-applyBtn"
-                      onClick={() => applyFix(r.value)}
-                      type="button"
-                    >
-                      Replace with: <strong>{r.value}</strong>
-                    </button>
-                  ))}
+                  ) : (
+                    <div className="detail-sub">No replacement offered — try rewriting this phrase.</div>
+                  )}
                 </div>
-
-                <button
-                  className="ucw-ignore"
-                  onClick={() => setSelectedIdx(-1)}
-                  type="button"
-                >
-                  Ignore this suggestion
-                </button>
-              </div>
-            )}
-          </aside>
-        </div>
-      </main>
+              )}
+            </aside>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

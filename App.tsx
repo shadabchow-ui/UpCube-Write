@@ -1,461 +1,305 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Editor from "./Editor";
-import "./index.css";
 
-type LTMatch = {
-  message: string;
-  shortMessage?: string;
-  offset: number;
-  length: number;
-  replacements: { value: string }[];
-  rule?: { issueType?: string; category?: { name?: string } };
-};
+type IssueType = "Spelling" | "Grammar" | "Style";
 
-type DocItem = {
+type Suggestion = {
   id: string;
+  type: IssueType;
   title: string;
-  text: string;
-  updatedAt: number;
+  message: string;
+  replacement?: string;
+  severity: "Low" | "Medium" | "High";
+  wordIndex: number; // index into words array
 };
-
-const STORAGE_KEY = "upcube_write_docs_v1";
-
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function escapeHtml(s: string) {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function getWordRangeAt(text: string, idx: number) {
-  const safe = clamp(idx, 0, Math.max(0, text.length - 1));
-  let start = safe;
-  let end = safe;
-
-  while (start > 0 && /\S/.test(text[start - 1])) start--;
-  while (end < text.length && /\S/.test(text[end])) end++;
-
-  return { start, end };
-}
-
-function replaceRange(text: string, start: number, end: number, replacement: string) {
-  return text.slice(0, start) + replacement + text.slice(end);
-}
-
-function buildHighlightedHtml(text: string, matches: LTMatch[], selectedIdx: number | null) {
-  // Convert offsets into non-overlapping spans (LanguageTool usually doesn't overlap, but be safe)
-  const spans = matches
-    .map((m, i) => ({ ...m, _i: i }))
-    .sort((a, b) => a.offset - b.offset);
-
-  let out = "";
-  let cursor = 0;
-
-  for (const s of spans) {
-    const start = clamp(s.offset, 0, text.length);
-    const end = clamp(s.offset + s.length, 0, text.length);
-    if (end <= cursor) continue; // overlap/invalid
-
-    // normal chunk
-    out += escapeHtml(text.slice(cursor, start));
-
-    // highlighted chunk
-    const chunk = escapeHtml(text.slice(start, end));
-    const isSelected = selectedIdx === s._i;
-
-    out += `<span class="hlt-word ${isSelected ? "is-selected" : ""}" data-idx="${s._i}">${chunk}</span>`;
-
-    cursor = end;
-  }
-
-  out += escapeHtml(text.slice(cursor));
-
-  // Preserve line breaks in HTML
-  return out.replaceAll("\n", "<br/>");
-}
-
 export default function App() {
-  const [docs, setDocs] = useState<DocItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        const initial: DocItem = {
-          id: uid(),
-          title: "Untitled document",
-          text: "This are bad sentence. Welcome to UpCube Writer — your AI-powered writing assistant.",
-          updatedAt: Date.now(),
-        };
-        return [initial];
-      }
-      const parsed = JSON.parse(raw) as DocItem[];
-      return Array.isArray(parsed) && parsed.length ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [text, setText] = useState(
+    "This are bad sentence. Welcome to UpCube Writer — your AI-powered writing assistant."
+  );
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
 
-  const [activeId, setActiveId] = useState<string>(() => (docs[0]?.id ? docs[0].id : ""));
-  const activeDoc = useMemo(() => docs.find((d) => d.id === activeId) ?? docs[0], [docs, activeId]);
+  const words = useMemo(() => {
+    return text
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean);
+  }, [text]);
 
-  const [language, setLanguage] = useState("en-US");
-  const [matches, setMatches] = useState<LTMatch[]>([]);
-  const [selectedMatchIdx, setSelectedMatchIdx] = useState<number | null>(null);
-  const [isChecking, setIsChecking] = useState(false);
-  const [status, setStatus] = useState<string>("");
+  // Very simple local “checks” (placeholder until you wire the API)
+  const suggestions: Suggestion[] = useMemo(() => {
+    const items: Suggestion[] = [];
 
-  const activeText = activeDoc?.text ?? "";
-
-  // persist docs
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
-    } catch {
-      // ignore
-    }
-  }, [docs]);
-
-  // keep activeId valid
-  useEffect(() => {
-    if (!docs.length) return;
-    if (!activeId || !docs.some((d) => d.id === activeId)) {
-      setActiveId(docs[0].id);
-    }
-  }, [docs, activeId]);
-
-  const highlightedHtml = useMemo(() => {
-    return buildHighlightedHtml(activeText, matches, selectedMatchIdx);
-  }, [activeText, matches, selectedMatchIdx]);
-
-  function updateActiveDoc(patch: Partial<DocItem>) {
-    if (!activeDoc) return;
-    setDocs((prev) =>
-      prev.map((d) =>
-        d.id === activeDoc.id
-          ? {
-              ...d,
-              ...patch,
-              updatedAt: Date.now(),
-            }
-          : d
-      )
-    );
-  }
-
-  function newDoc() {
-    const doc: DocItem = {
-      id: uid(),
-      title: "Untitled document",
-      text: "",
-      updatedAt: Date.now(),
-    };
-    setDocs((prev) => [doc, ...prev]);
-    setActiveId(doc.id);
-    setMatches([]);
-    setSelectedMatchIdx(null);
-    setStatus("");
-  }
-
-  function deleteDoc(id: string) {
-    setDocs((prev) => prev.filter((d) => d.id !== id));
-    setMatches([]);
-    setSelectedMatchIdx(null);
-    setStatus("");
-  }
-
-  async function checkGrammar(text: string) {
-    setIsChecking(true);
-    setStatus("Checking…");
-    setSelectedMatchIdx(null);
-
-    try {
-      // If you later host your own LT API, replace this endpoint.
-      const res = await fetch("https://api.languagetool.org/v2/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          text,
-          language,
-        }),
+    // Example: "This are" => Grammar
+    const idxThis = words.findIndex((w, i) => {
+      const cur = w.toLowerCase().replace(/[^\w']/g, "");
+      const next = (words[i + 1] || "").toLowerCase().replace(/[^\w']/g, "");
+      return cur === "this" && next === "are";
+    });
+    if (idxThis !== -1) {
+      items.push({
+        id: "g1",
+        type: "Grammar",
+        title: "Grammatical problem: use ‘these’",
+        message:
+          "The singular demonstrative pronoun ‘this’ does not agree with the plural verb ‘are’. Did you mean “these”?",
+        replacement: "These",
+        severity: "High",
+        wordIndex: idxThis,
       });
-
-      if (!res.ok) {
-        throw new Error(`LanguageTool error: ${res.status}`);
-      }
-
-      const data = (await res.json()) as { matches: LTMatch[] };
-      setMatches(Array.isArray(data.matches) ? data.matches : []);
-      setStatus(`Found ${data.matches?.length ?? 0} suggestion(s).`);
-    } catch (e: any) {
-      setMatches([]);
-      setStatus(e?.message ? `Error: ${e.message}` : "Error checking text.");
-    } finally {
-      setIsChecking(false);
     }
-  }
 
-  // Debounced checking
+    // Example: "are bad sentence" => Grammar/Style (rough)
+    const idxSentence = words.findIndex((w) =>
+      w.toLowerCase().includes("sentence")
+    );
+    if (idxSentence !== -1) {
+      items.push({
+        id: "s1",
+        type: "Style",
+        title: "Word choice",
+        message:
+          "Consider making this more natural. Example: “This sentence is incorrect.”",
+        replacement: "sentence is incorrect",
+        severity: "Medium",
+        wordIndex: clamp(idxSentence - 1, 0, Math.max(0, words.length - 1)),
+      });
+    }
+
+    // Example spelling: "UpCube" split or "Up Cube"
+    const idxUp = words.findIndex((w) => w.toLowerCase() === "upcube");
+    if (idxUp !== -1) {
+      items.push({
+        id: "sp1",
+        type: "Spelling",
+        title: "Consistency",
+        message:
+          "Keep brand spelling consistent. If you use “UpCube” elsewhere, keep it the same here.",
+        replacement: "UpCube",
+        severity: "Low",
+        wordIndex: idxUp,
+      });
+    }
+
+    return items;
+  }, [words]);
+
   useEffect(() => {
-    if (!activeDoc) return;
-
-    const t = window.setTimeout(() => {
-      const txt = activeDoc.text.trim();
-      if (!txt) {
-        setMatches([]);
-        setSelectedMatchIdx(null);
-        setStatus("");
-        return;
-      }
-      checkGrammar(activeDoc.text);
-    }, 600);
-
-    return () => window.clearTimeout(t);
+    // Auto-select first issue
+    if (!selectedIssueId && suggestions.length) {
+      setSelectedIssueId(suggestions[0].id);
+    }
+    if (selectedIssueId && !suggestions.some((s) => s.id === selectedIssueId)) {
+      setSelectedIssueId(suggestions[0]?.id ?? null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDoc?.text, language]);
+  }, [suggestions.length]);
 
-  function applyReplacement(matchIdx: number, replacement: string) {
-    if (!activeDoc) return;
-    const m = matches[matchIdx];
-    if (!m) return;
+  const selected = suggestions.find((s) => s.id === selectedIssueId) ?? null;
 
-    // Apply to the current text using offsets (best effort)
-    const start = m.offset;
-    const end = m.offset + m.length;
+  // Build highlighted HTML for editor
+  const highlightedHtml = useMemo(() => {
+    if (!words.length) return "";
 
-    const next = replaceRange(activeDoc.text, start, end, replacement);
-    updateActiveDoc({ text: next });
+    const markSet = new Set<number>(suggestions.map((s) => s.wordIndex));
 
-    // After apply, clear selection
-    setSelectedMatchIdx(null);
-  }
+    const html = words
+      .map((w, i) => {
+        const safe = w.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (!markSet.has(i)) return safe;
 
-  function ignoreSuggestion(matchIdx: number) {
-    setMatches((prev) => prev.filter((_, i) => i !== matchIdx));
-    setSelectedMatchIdx(null);
-  }
+        // Find the suggestion for that word index
+        const s = suggestions.find((x) => x.wordIndex === i);
+        const color =
+          s?.type === "Spelling"
+            ? "bg-amber-100 ring-amber-200"
+            : s?.type === "Grammar"
+            ? "bg-red-100 ring-red-200"
+            : "bg-blue-100 ring-blue-200";
 
-  const selected = selectedMatchIdx !== null ? matches[selectedMatchIdx] : null;
-  const selectedReplacements = selected?.replacements ?? [];
+        return `<span data-idx="${i}" class="cursor-pointer rounded px-1 py-0.5 ring-1 ${color}">${safe}</span>`;
+      })
+      .join(" ");
+
+    // wrap in paragraph so TipTap renders nicely
+    return `<p>${html}</p>`;
+  }, [words, suggestions]);
+
+  const applySuggestion = (s: Suggestion) => {
+    if (!s.replacement) return;
+    const newWords = [...words];
+    // Simple replacement: replace the word at wordIndex with replacement
+    newWords[s.wordIndex] = s.replacement;
+    setText(newWords.join(" "));
+  };
+
+  const ignoreSuggestion = (s: Suggestion) => {
+    // In a real app, you'd store ignored IDs in state.
+    // For now, just clear selection.
+    if (selectedIssueId === s.id) setSelectedIssueId(null);
+  };
+
+  const severityBadge = (sev: Suggestion["severity"]) => {
+    const cls =
+      sev === "High"
+        ? "bg-red-100 text-red-700"
+        : sev === "Medium"
+        ? "bg-amber-100 text-amber-700"
+        : "bg-slate-100 text-slate-700";
+    return (
+      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${cls}`}>
+        {sev} Issue
+      </span>
+    );
+  };
 
   return (
-    <div className="app-shell">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Top bar */}
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">U</div>
-          <div className="brand-meta">
-            <div className="brand-name">UpCube Write</div>
-            <div className="brand-sub">Smart writing assistant</div>
-          </div>
-        </div>
-
-        <div className="topbar-actions">
-          <div className="select">
-            <label className="sr-only" htmlFor="lang">
-              Language
-            </label>
-            <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value)}>
-              <option value="en-US">English (US)</option>
-              <option value="en-GB">English (UK)</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-            </select>
+      <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-slate-900 text-white grid place-items-center font-bold">
+              U
+            </div>
+            <div>
+              <div className="font-bold leading-tight">UpCube Writer</div>
+              <div className="text-xs text-slate-500">
+                Smart Writing Assistant
+              </div>
+            </div>
           </div>
 
-          <button className="btn btn-primary" onClick={newDoc}>
-            New doc
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 text-sm">
+              Export
+            </button>
+            <button className="px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm">
+              Save
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="layout">
-        {/* Left sidebar (docs) */}
-        <aside className="sidebar">
-          <div className="sidebar-head">
-            <div className="sidebar-title">Docs</div>
+      {/* Main */}
+      <main className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-12 gap-6">
+        {/* Left: Editor */}
+        <section className="col-span-12 lg:col-span-8">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold">Writing</div>
+              <div className="text-xs text-slate-500">
+                Live feedback enabled
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select className="px-3 py-2 rounded-xl border bg-white text-sm">
+                <option>Language: English (US)</option>
+              </select>
+              <span className="text-xs text-slate-500">
+                {words.length} words
+              </span>
+            </div>
           </div>
 
-          <div className="doclist">
-            {docs.map((d) => (
-              <button
-                key={d.id}
-                className={`docitem ${d.id === activeId ? "is-active" : ""}`}
-                onClick={() => setActiveId(d.id)}
-                type="button"
-              >
-                <div className="docitem-title">{d.title || "Untitled document"}</div>
-                <div className="docitem-meta">
-                  {new Date(d.updatedAt).toLocaleString(undefined, {
-                    month: "short",
-                    day: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
+          <Editor
+            content={text}
+            onChange={setText}
+            highlights={highlightedHtml}
+            onWordClick={(idx) => {
+              const s = suggestions.find((x) => x.wordIndex === idx);
+              if (s) setSelectedIssueId(s.id);
+            }}
+          />
 
-                <span
-                  className="docitem-trash"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (docs.length > 1) deleteDoc(d.id);
-                  }}
-                  title={docs.length > 1 ? "Delete" : "Keep at least 1 doc"}
-                  role="button"
-                >
-                  ✕
-                </span>
+          <div className="mt-4 text-xs text-slate-500">
+            Powered by UpCube Language Engine
+          </div>
+        </section>
+
+        {/* Right: Suggestions */}
+        <aside className="col-span-12 lg:col-span-4">
+          <div className="sticky top-[72px]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-sm font-semibold">Suggestions</div>
+                <div className="text-xs text-slate-500">
+                  {suggestions.length} issues found
+                </div>
+              </div>
+              <button className="text-sm px-3 py-2 rounded-xl border bg-white hover:bg-slate-50">
+                Recheck
               </button>
-            ))}
+            </div>
+
+            <div className="space-y-3">
+              {suggestions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelectedIssueId(s.id)}
+                  className={[
+                    "w-full text-left rounded-2xl border bg-white p-4 shadow-sm hover:shadow transition",
+                    selectedIssueId === s.id
+                      ? "border-slate-900 ring-1 ring-slate-900"
+                      : "border-slate-200",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-semibold text-sm">{s.title}</div>
+                    {severityBadge(s.severity)}
+                  </div>
+                  <div className="mt-2 text-xs text-slate-600 line-clamp-3">
+                    {s.message}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Selected details */}
+            <div className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+              {!selected ? (
+                <div className="text-sm text-slate-600">No issue selected.</div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">{selected.title}</div>
+                      <div className="text-xs text-slate-500">{selected.type}</div>
+                    </div>
+                    {severityBadge(selected.severity)}
+                  </div>
+
+                  <p className="mt-3 text-sm text-slate-700 leading-relaxed">
+                    {selected.message}
+                  </p>
+
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      onClick={() => applySuggestion(selected)}
+                      disabled={!selected.replacement}
+                      className="px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm disabled:opacity-50"
+                    >
+                      Apply correction
+                    </button>
+                    <button
+                      onClick={() => ignoreSuggestion(selected)}
+                      className="px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 text-sm"
+                    >
+                      Ignore
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </aside>
-
-        {/* Main editor + suggestions */}
-        <main className="main">
-          <div className="main-grid">
-            {/* Editor column */}
-            <section className="card editor-card">
-              <div className="card-head">
-                <input
-                  className="title-input"
-                  value={activeDoc?.title ?? ""}
-                  onChange={(e) => updateActiveDoc({ title: e.target.value })}
-                  placeholder="Untitled document"
-                />
-
-                <div className="card-head-right">
-                  <div className={`pill ${isChecking ? "is-warn" : matches.length ? "is-good" : "is-muted"}`}>
-                    {isChecking ? "Checking…" : matches.length ? `${matches.length} suggestion(s)` : "No suggestions"}
-                  </div>
-                </div>
-              </div>
-
-              <div className="editor-wrap">
-                <Editor
-                  content={activeText}
-                  onChange={(txt) => updateActiveDoc({ text: txt })}
-                  highlights={highlightedHtml}
-                  onWordClick={(idx) => setSelectedMatchIdx(idx)}
-                />
-              </div>
-
-              <div className="status-row">
-                <div className="status-text">{status}</div>
-              </div>
-            </section>
-
-            {/* Suggestions column */}
-            <aside className="card suggestions-card">
-              <div className="card-head">
-                <div className="card-title">Suggestions</div>
-              </div>
-
-              {isChecking ? (
-                <div className="empty">
-                  <div className="spinner" />
-                  <div>Analyzing your writing…</div>
-                </div>
-              ) : matches.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-title">All clear</div>
-                  <div className="empty-sub">Keep typing — suggestions will appear here.</div>
-                </div>
-              ) : (
-                <div className="suggestions">
-                  {matches.map((m, i) => {
-                    const title =
-                      m.shortMessage ||
-                      m.rule?.category?.name ||
-                      m.rule?.issueType ||
-                      "Suggestion";
-
-                    return (
-                      <button
-                        key={`${m.offset}-${m.length}-${i}`}
-                        className={`suggestion ${selectedMatchIdx === i ? "is-active" : ""}`}
-                        onClick={() => setSelectedMatchIdx(i)}
-                        type="button"
-                      >
-                        <div className="suggestion-top">
-                          <div className="suggestion-title">{title}</div>
-                          <div className="suggestion-tag">
-                            {(m.rule?.issueType || "issue").toLowerCase()}
-                          </div>
-                        </div>
-                        <div className="suggestion-msg">{m.message}</div>
-
-                        <div className="suggestion-actions">
-                          <button
-                            className="btn btn-ghost"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              ignoreSuggestion(i);
-                            }}
-                            type="button"
-                          >
-                            Ignore
-                          </button>
-
-                          <button
-                            className="btn btn-primary"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              const rep = m.replacements?.[0]?.value;
-                              if (rep) applyReplacement(i, rep);
-                            }}
-                            disabled={!m.replacements?.length}
-                            type="button"
-                          >
-                            Apply
-                          </button>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Details panel for selected suggestion */}
-              {selected && (
-                <div className="detail">
-                  <div className="detail-head">Apply correction</div>
-
-                  {selectedReplacements.length ? (
-                    <div className="replacements">
-                      {selectedReplacements.slice(0, 6).map((r, idx) => (
-                        <button
-                          key={`${r.value}-${idx}`}
-                          className="chip"
-                          onClick={() => {
-                            if (selectedMatchIdx !== null) applyReplacement(selectedMatchIdx, r.value);
-                          }}
-                          type="button"
-                        >
-                          {r.value}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="detail-sub">No replacement offered — try rewriting this phrase.</div>
-                  )}
-                </div>
-              )}
-            </aside>
-          </div>
-        </main>
-      </div>
+      </main>
     </div>
   );
 }

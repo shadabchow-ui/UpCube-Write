@@ -52,9 +52,7 @@ async function ltCheck(text: string, language: string, signal?: AbortSignal) {
     signal,
   });
 
-  if (!res.ok) {
-    throw new Error("LanguageTool API error");
-  }
+  if (!res.ok) throw new Error("Language service unavailable");
 
   const json = await res.json();
   return (json.matches || []) as LTMatch[];
@@ -77,7 +75,7 @@ function renderHighlightedText(text: string, matches: LTMatch[]) {
     result += `
       <span
         data-idx="${i}"
-        class="underline decoration-amber-400 decoration-2 cursor-pointer bg-amber-100/50 rounded-sm"
+        class="underline decoration-amber-400 decoration-2 cursor-pointer bg-amber-100/50 rounded-sm transition-colors hover:bg-amber-200/60"
       >
         ${escapeHtml(text.slice(m.offset, m.offset + m.length))}
       </span>
@@ -91,10 +89,10 @@ function renderHighlightedText(text: string, matches: LTMatch[]) {
 }
 
 export default function App() {
-  const [docTitle, setDocTitle] = useState("My Document");
+  const [docTitle, setDocTitle] = useState("Untitled Document");
   const [language, setLanguage] = useState("en-US");
   const [text, setText] = useState(
-    "This are bad sentence.\n\nStart typing and grammar suggestions will appear."
+    "This are bad sentence.\n\nWelcome to UpCube Writer – your AI-powered writing assistant."
   );
 
   const [matches, setMatches] = useState<LTMatch[]>([]);
@@ -126,7 +124,7 @@ export default function App() {
         setMatches(m);
         setSelectedIdx(0);
       })
-      .catch(() => setError("Could not analyze text"))
+      .catch(() => setError("Unable to review your text right now"))
       .finally(() => setLoading(false));
 
     return () => ac.abort();
@@ -152,23 +150,35 @@ export default function App() {
     const target = e.target as HTMLElement;
     const idx = target.getAttribute("data-idx");
 
-    if (idx) {
-      setSelectedIdx(Number(idx));
-    }
+    if (idx) setSelectedIdx(Number(idx));
   }
 
   const selected = matches[selectedIdx];
 
+  const severityStyles: Record<string, string> = {
+    error: "border-l-4 border-red-500 bg-red-50",
+    style: "border-l-4 border-amber-400 bg-amber-50",
+    info: "border-l-4 border-sky-400 bg-sky-50",
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex">
       {/* LEFT NAV */}
-      <aside className="w-[240px] border-r bg-white p-4">
-        <h2 className="text-lg font-bold mb-4">UpCube Write</h2>
+      <aside className="w-[250px] border-r bg-white p-5">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">
+            U
+          </div>
+          <div>
+            <div className="font-semibold text-lg">UpCube Writer</div>
+            <div className="text-xs text-slate-500">AI Writing Assistant</div>
+          </div>
+        </div>
 
-        <div className="mb-4">
-          <label className="text-xs">Language</label>
+        <div className="mb-5">
+          <label className="text-xs text-slate-500">Writing Language</label>
           <select
-            className="w-full border rounded p-2 text-sm"
+            className="w-full mt-1 border rounded-xl p-2 text-sm focus:ring-2 focus:ring-indigo-200 outline-none"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
           >
@@ -179,8 +189,8 @@ export default function App() {
           </select>
         </div>
 
-        <div className="text-xs text-slate-500">
-          API: {API_BASE}
+        <div className="text-xs text-slate-500 mt-8">
+          Powered by UpCube Language Engine
         </div>
       </aside>
 
@@ -188,13 +198,19 @@ export default function App() {
       <main className="flex-1 flex flex-col">
         <header className="h-16 bg-white border-b flex items-center px-6 justify-between">
           <input
-            className="text-lg font-semibold outline-none"
+            className="text-lg font-semibold outline-none bg-transparent focus:ring-2 focus:ring-indigo-200 rounded-lg px-2"
             value={docTitle}
             onChange={(e) => setDocTitle(e.target.value)}
           />
 
-          <div className="text-sm text-slate-600">
-            {stats.words} words • {stats.sentences} sentences
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-slate-600">
+              {stats.words} words • {stats.sentences} sentences
+            </div>
+
+            <div className="px-3 py-1 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-200">
+              Live feedback enabled
+            </div>
           </div>
         </header>
 
@@ -209,25 +225,36 @@ export default function App() {
               onInput={(e) =>
                 setText((e.target as HTMLDivElement).innerText)
               }
-              className="w-full min-h-[450px] bg-white border rounded p-4 outline-none leading-7"
+              className="w-full min-h-[520px] bg-white border rounded-2xl p-5 outline-none leading-[1.9] text-[16px] shadow-sm focus:ring-2 focus:ring-indigo-100"
             />
 
             {error && (
-              <div className="mt-4 text-red-600 text-sm">{error}</div>
+              <div className="mt-4 text-red-600 text-sm bg-red-50 p-3 rounded-xl">
+                {error}
+              </div>
             )}
           </section>
 
           {/* SUGGESTIONS PANEL */}
-          <aside className="w-[360px] border-l bg-white p-4 overflow-auto">
-            <h3 className="font-semibold mb-2">Writing Insights</h3>
+          <aside className="w-[380px] border-l bg-white p-5 overflow-auto">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold text-[15px]">
+                Improvements
+              </h3>
 
-            {loading && <div className="text-sm">Checking…</div>}
+              {loading && (
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
+                  Reviewing your text…
+                </div>
+              )}
+            </div>
 
-            {!loading && matches.length === 0 && (
-              <div className="text-center mt-10 text-slate-600">
-                <div className="text-lg font-semibold">All clear 🎉</div>
-                <div className="text-sm mt-1">
-                  Your writing looks polished and correct.
+            {!loading && matches.length === 0 && !error && (
+              <div className="text-center mt-12 text-slate-600">
+                <div className="text-xl font-semibold">Looks great 🎉</div>
+                <div className="text-sm mt-2">
+                  No improvements found. Keep up the strong writing.
                 </div>
               </div>
             )}
@@ -239,29 +266,23 @@ export default function App() {
                 <div
                   key={i}
                   onClick={() => setSelectedIdx(i)}
-                  className={`border rounded p-3 mb-2 cursor-pointer ${
-                    i === selectedIdx ? "bg-emerald-50" : "bg-white"
-                  } ${
-                    sev === "error"
-                      ? "border-red-300"
-                      : sev === "style"
-                      ? "border-yellow-300"
-                      : "border-blue-300"
-                  }`}
+                  className={`transition transform hover:-translate-y-[1px] hover:shadow-sm cursor-pointer rounded-xl p-4 mb-3 ${
+                    severityStyles[sev]
+                  } ${i === selectedIdx ? "ring-2 ring-indigo-200" : ""}`}
                 >
-                  <div className="font-medium text-sm">
+                  <div className="font-medium text-[15px]">
                     {m.shortMessage || m.message}
                   </div>
 
-                  <div className="text-xs mt-1 text-slate-600">
+                  <div className="text-[13px] mt-1 text-slate-600">
                     {m.message}
                   </div>
 
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {m.replacements.slice(0, 3).map((r) => (
                       <span
                         key={r.value}
-                        className="px-2 py-1 text-xs border rounded bg-white"
+                        className="px-2 py-1 text-xs border rounded-full bg-white"
                       >
                         {r.value}
                       </span>
@@ -272,14 +293,16 @@ export default function App() {
             })}
 
             {selected && (
-              <div className="mt-4 border rounded p-3 bg-slate-50">
-                <h4 className="font-semibold mb-2">Apply Fix</h4>
+              <div className="mt-6 border rounded-2xl p-4 bg-slate-50">
+                <h4 className="font-semibold mb-3 text-sm">
+                  Use Suggestion
+                </h4>
 
                 {selected.replacements.slice(0, 5).map((r) => (
                   <button
                     key={r.value}
                     onClick={() => applyFix(r.value)}
-                    className="block w-full text-left border bg-white rounded px-3 py-2 text-sm mb-2"
+                    className="block w-full text-left border bg-white rounded-xl px-3 py-2 text-[13px] mb-2 hover:bg-indigo-50 transition"
                   >
                     Replace with: <b>{r.value}</b>
                   </button>

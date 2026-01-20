@@ -1,0 +1,106 @@
+/* src/index.css */
+
+/* Basic reset */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  background: #0b1220;
+  color: #e7eefc;
+}
+
+/* Layout helpers */
+.container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.2px;
+}
+.brand p {
+  margin: 0;
+  opacity: 0.75;
+  font-size: 13px;
+}
+
+/* Editor */
+textarea {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.05);
+  color: #e7eefc;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.45;
+}
+textarea:focus {
+  border-color: rgba(96,165,250,0.75);
+  box-shadow: 0 0 0 4px rgba(96,165,250,0.18);
+}
+
+/* Buttons / inputs */
+select, button {
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: #e7eefc;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+button {
+  cursor: pointer;
+}
+button:hover {
+  background: rgba(255,255,255,0.10);
+}
+
+/* Suggestions list */
+.sectionTitle {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  opacity: 0.9;
+}
+.suggestions {
+  display: grid;
+  gap: 10px;
+}
+.suggestion {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+}
+.muted {
+  opacity: 0.7;
+  font-size: 13px;
+}
